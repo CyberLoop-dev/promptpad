@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>promptpad: reusable prompt templates</title>
+<style>
+:root{--bg:#f7f5fb;--card:#fff;--fg:#1e1b2e;--mut:#6b6880;--line:#e6e2f0;--acc:#c026d3;--soft:#fae8ff}
+@media (prefers-color-scheme:dark){:root{--bg:#120d1c;--card:#1c1530;--fg:#efeaf9;--mut:#a39bbd;--line:#322a4d;--acc:#e879f9;--soft:#2a1a3d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 ui-sans-serif,system-ui,"Segoe UI",Helvetica,Arial,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:28px 18px 60px}
+h1{margin:0;font-size:30px;letter-spacing:-.5px}
+.sub{color:var(--mut);margin:4px 0 20px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut)}
+textarea,input{width:100%;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+textarea{min-height:200px;resize:vertical}
+textarea:focus,input:focus{outline:2px solid var(--acc);outline-offset:1px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+button{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:8px 14px;font:600 14px inherit;cursor:pointer}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button:hover{filter:brightness(1.1)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+pre{white-space:pre-wrap;word-break:break-word;margin:0;background:var(--soft);border-radius:10px;padding:12px;min-height:120px;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.saved{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.item{display:flex;gap:6px}
+.item button:first-child{flex:1;text-align:left}
+.empty{color:var(--mut);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>📝 promptpad</h1>
+  <p class="sub">Write a template with <code>{{variables}}</code>, fill the blanks, copy the result.</p>
+  <div class="grid">
+    <section class="card">
+      <h2>Template</h2>
+      <textarea id="tpl" spellcheck="false"></textarea>
+      <div id="vars"></div>
+    </section>
+    <section class="card">
+      <h2>Result</h2>
+      <pre id="out"></pre>
+      <div class="bar">
+        <button id="copy">Copy result</button>
+        <button id="save" class="ghost">Save template</button>
+        <button id="export" class="ghost">Export JSON</button>
+        <button id="import" class="ghost">Import JSON</button>
+      </div>
+      <h2 style="margin-top:18px">Saved templates</h2>
+      <div id="saved" class="saved"></div>
+    </section>
+  </div>
+</main>
+<script>
+const KEY = "promptpad.v1";
+const SAMPLE = "You are a senior {{role}}.\n\nReview the following {{thing}} and give me {{count}} concrete improvements, ordered by impact.\n\n{{thing}}:\n{{content}}";
+const $ = id => document.getElementById(id);
+let store = readStore();
+let values = {};
+
+function readStore(){
+  try { const v = JSON.parse(localStorage.getItem(KEY)); if (v && typeof v === "object") return {draft: v.draft || SAMPLE, saved: Array.isArray(v.saved) ? v.saved : []}; } catch (e) {}
+  return {draft: SAMPLE, saved: []};
+}
+function persist(){ try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
+
+function varNames(t){
+  const seen = [];
+  for (const m of t.matchAll(/\{\{\s*([\w .-]+?)\s*\}\}/g)) if (!seen.includes(m[1])) seen.push(m[1]);
+  return seen;
+}
+function render(t){
+  return t.replace(/\{\{\s*([\w .-]+?)\s*\}\}/g, (all, n) => values[n] ? values[n] : all);
+}
+function drawVars(){
+  const box = $("vars"); box.textContent = "";
+  for (const n of varNames($("tpl").value)) {
+    const l = document.createElement("label"); l.textContent = n;
+    const i = document.createElement("input"); i.value = values[n] || "";
+    i.addEventListener("input", () => { values[n] = i.value; drawOut(); });
+    box.append(l, i);
+  }
+}
+function drawOut(){ $("out").textContent = render($("tpl").value); }
+function drawSaved(){
+  const box = $("saved"); box.textContent = "";
+  if (!store.saved.length) { const p = document.createElement("div"); p.className = "empty"; p.textContent = "Nothing saved yet."; box.appendChild(p); return; }
+  store.saved.forEach((s, idx) => {
+    const row = document.createElement("div"); row.className = "item";
+    const load = document.createElement("button"); load.className = "ghost"; load.textContent = s.name;
+    load.onclick = () => { $("tpl").value = s.text; onTpl(); };
+    const del = document.createElement("button"); del.className = "ghost"; del.textContent = "✕"; del.title = "Delete";
+    del.onclick = () => { store.saved.splice(idx, 1); persist(); drawSaved(); };
+    row.append(load, del); box.appendChild(row);
+  });
+}
+function onTpl(){ store.draft = $("tpl").value; persist(); drawVars(); drawOut(); }
+
+$("tpl").value = store.draft;
+$("tpl").addEventListener("input", onTpl);
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("out").textContent); $("copy").textContent = "Copied ✓"; }
+  catch (e) { $("copy").textContent = "Copy failed"; }
+  setTimeout(() => $("copy").textContent = "Copy result", 1400);
+};
+$("save").onclick = () => {
+  const name = prompt("Name this template:", ($("tpl").value.split("\n")[0] || "Template").slice(0, 40));
+  if (!name) return;
+  store.saved.push({name, text: $("tpl").value}); persist(); drawSaved();
+};
+$("export").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(store.saved, null, 2)], {type: "application/json"}));
+  a.download = "promptpad-templates.json"; a.click(); URL.revokeObjectURL(a.href);
+};
+$("import").onclick = () => {
+  const f = document.createElement("input"); f.type = "file"; f.accept = "application/json";
+  f.onchange = async () => {
+    try {
+      const arr = JSON.parse(await f.files[0].text());
+      if (!Array.isArray(arr)) throw new Error("bad file");
+      for (const s of arr) if (s && typeof s.name === "string" && typeof s.text === "string") store.saved.push({name: s.name, text: s.text});
+      persist(); drawSaved();
+    } catch (e) { alert("That file is not a valid promptpad export."); }
+  };
+  f.click();
+};
+onTpl(); drawSaved();
+</script>
+</body>
+</html>
